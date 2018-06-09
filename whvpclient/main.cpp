@@ -836,7 +836,7 @@ int main() {
             printf("Failed to retrieve VCPU registers\n");
             return -1;
         }
-        
+
         // Enable interrupts
         vals[0].Reg32 |= 0x200;
 
@@ -875,7 +875,55 @@ int main() {
     // ----- PMIO -------------------------------------------------------------------------------------------------------------
 
     printf("Testing PMIO\n\n");
-    
+
+    // Set callbacks to validate inputs and outputs
+    vcpu->SetIoPortCallback([](WHV_EMULATOR_IO_ACCESS_INFO *io) -> HRESULT {
+        // 8-bit operations
+        if (io->Direction == 0 && io->Port == 0x1000 && io->AccessSize == 1) {
+            printf("Received I/O port callback for reading 8 bits from the correct address!\n");
+            io->Data = 0xac;
+            return S_OK;
+        }
+        if (io->Direction == 1 && io->Port == 0x1001 && io->AccessSize == 1) {
+            printf("Received I/O port callback for writing 8 bits to the correct address!\n");
+            if (io->Data == 0x53) {
+                printf("And the value was correct!\n");
+            }
+            return S_OK;
+        }
+
+        // 16-bit operations
+        if (io->Direction == 0 && io->Port == 0x1002 && io->AccessSize == 2) {
+            printf("Received I/O port callback for reading 16 bits from the correct address!\n");
+            io->Data = 0xfade;
+            return S_OK;
+        }
+        if (io->Direction == 1 && io->Port == 0x1003 && io->AccessSize == 2) {
+            printf("Received I/O port callback for writing 16 bits to the correct address!\n");
+            if (io->Data == 0x0521) {
+                printf("And the value was correct!\n");
+            }
+            return S_OK;
+        }
+
+        // 32-bit operations
+        if (io->Direction == 0 && io->Port == 0x1004 && io->AccessSize == 4) {
+            printf("Received I/O port callback for reading 32 bits from the correct address!\n");
+            io->Data = 0xfeedbabe;
+            return S_OK;
+        }
+        if (io->Direction == 1 && io->Port == 0x1005 && io->AccessSize == 4) {
+            printf("Received I/O port callback for writing 32 bits to the correct address!\n");
+            if (io->Data == 0x01124541) {
+                printf("And the value was correct!\n");
+            }
+            return S_OK;
+        }
+
+        return E_INVALIDARG;
+    });
+
+
     // Run CPU until 8-bit IN
     vcpuStatus = vcpu->Run();
     if (WHVVCPUS_SUCCESS != vcpuStatus) {
@@ -888,7 +936,6 @@ int main() {
         printf("Emulation exited due to PMIO as expected!\n");
         if (exitCtx->IoPortAccess.AccessInfo.IsWrite == FALSE && exitCtx->IoPortAccess.PortNumber == 0x1000 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 1) {
             printf("And we got the right address and direction!\n");
-            // TODO: instruction emulation
         }
         break;
     default:
@@ -913,10 +960,102 @@ int main() {
         printf("Emulation exited due to PMIO as expected!\n");
         if (exitCtx->IoPortAccess.AccessInfo.IsWrite == TRUE && exitCtx->IoPortAccess.PortNumber == 0x1001 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 1) {
             printf("And we got the right address and direction!\n");
-            // TODO: instruction emulation
-            if (exitCtx->IoPortAccess.Rax == 0x53) {
-                printf("And the right result too!\n");
-            }
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU until 16-bit IN
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == FALSE && exitCtx->IoPortAccess.PortNumber == 0x1002 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 2) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU until 16-bit OUT
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == TRUE && exitCtx->IoPortAccess.PortNumber == 0x1003 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 2) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU until 32-bit IN
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == FALSE && exitCtx->IoPortAccess.PortNumber == 0x1004 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 4) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU until 32-bit OUT
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == TRUE && exitCtx->IoPortAccess.PortNumber == 0x1005 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 4) {
+            printf("And we got the right address and direction!\n");
         }
         break;
     default:

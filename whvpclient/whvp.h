@@ -2,6 +2,7 @@
 
 #include <Windows.h>
 #include <WinHvPlatform.h>
+#include <WinHvEmulation.h>
 
 #include <vector>
 
@@ -31,12 +32,16 @@ enum WHvVCPUStatus {
 
     WHVVCPUS_FAILED = 0x80000000,        // The operation failed
     WHVVCPUS_CREATE_FAILED,              // Failed to create VCPU
+    WHVVCPUS_CREATE_EMU_FAILED,          // Failed to create instruction emulator
+    WHVVCPUS_DESTROY_EMU_FAILED,         // Failed to destroy the instruction emulator
     WHVVCPUS_NOT_INITIALIZED,            // Attempted to delete an uninitialized VCPU
     WHVVCPUS_ALREADY_INITIALIZED,        // Attempted to create an initialized VCPU
     WHVVCPUS_INVALID_POINTER,            // An invalid pointer to a VCPU was passed to a function
     WHVVCPUS_INVALID_OWNER,              // Attempted to delete a VCPU that does not belong to the partition
     WHVVCPUS_GET_REGS_FAILED,            // Failed to get registers
     WHVVCPUS_SET_REGS_FAILED,            // Failed to set registers
+    WHVVCPUS_RUN_FAILED,                 // VCPU execution failed
+    WHVVCPUS_EMULATION_FAILED,           // VCPU instruction emulation failed
 };
 
 
@@ -92,6 +97,9 @@ private:
 };
 
 
+typedef HRESULT (CALLBACK *WHvIoPortCallback)(WHV_EMULATOR_IO_ACCESS_INFO* IoAccess);
+typedef HRESULT (CALLBACK *WHvMemoryCallback)(WHV_EMULATOR_MEMORY_ACCESS_INFO* MemoryAccess);
+
 class WHvVCPU {
 public:
     WHvVCPUStatus Run();
@@ -99,12 +107,15 @@ public:
 
     WHvVCPUStatus Interrupt(uint16_t vector);
 
-    WHvVCPUStatus GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
-    WHvVCPUStatus SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
+    WHvVCPUStatus GetRegisters(const WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
+    WHvVCPUStatus SetRegisters(const WHV_REGISTER_NAME *regs, UINT32 count, const WHV_REGISTER_VALUE *values);
 
     WHvVCPUStatus Close();
 
     const WHV_RUN_VP_EXIT_CONTEXT * ExitContext() const { return &m_exitContext; }
+
+    void SetIoPortCallback(WHvIoPortCallback ioPortCallback) { m_ioPortCallback = ioPortCallback; }
+    void SetMemoryCallback(WHvMemoryCallback memoryCallback) { m_memoryCallback = memoryCallback; }
 
 private:
     WHvVCPU(WHV_PARTITION_HANDLE hPartition, UINT32 vpIndex);
@@ -112,11 +123,23 @@ private:
 
     WHvVCPUStatus Initialize();
 
+    bool m_initialized;
+
     WHV_PARTITION_HANDLE m_partitionHandle;
     UINT32 m_vpIndex;
     WHV_RUN_VP_EXIT_CONTEXT m_exitContext;
 
-    bool m_initialized;
+    WHV_EMULATOR_HANDLE m_emuHandle;
+    WHvIoPortCallback m_ioPortCallback;
+    WHvMemoryCallback m_memoryCallback;
+
+
+    static HRESULT GetVirtualProcessorRegistersCallback(VOID* Context, const WHV_REGISTER_NAME* RegisterNames, UINT32 RegisterCount, WHV_REGISTER_VALUE* RegisterValues);
+    static HRESULT SetVirtualProcessorRegistersCallback(VOID* Context, const WHV_REGISTER_NAME* RegisterNames, UINT32 RegisterCount, const WHV_REGISTER_VALUE* RegisterValues);
+    static HRESULT TranslateGvaPageCallback(VOID* Context, WHV_GUEST_VIRTUAL_ADDRESS Gva, WHV_TRANSLATE_GVA_FLAGS TranslateFlags, WHV_TRANSLATE_GVA_RESULT_CODE* TranslationResult, WHV_GUEST_PHYSICAL_ADDRESS* Gpa);
+    static HRESULT IoPortCallback(VOID* Context, WHV_EMULATOR_IO_ACCESS_INFO* IoAccess);
+    static HRESULT MemoryCallback(VOID* Context, WHV_EMULATOR_MEMORY_ACCESS_INFO* MemoryAccess);
+
 
     friend class WHvPartition;
 };

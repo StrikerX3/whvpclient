@@ -263,10 +263,14 @@ WHvVCPUStatus WHvPartition::DeleteVCPU(WHvVCPU **ppVcpu) {
     return WHVVCPUS_SUCCESS;
 }
 
+
 WHvVCPU::WHvVCPU(WHV_PARTITION_HANDLE hPartition, UINT32 vpIndex)
     : m_partitionHandle(hPartition)
     , m_vpIndex(vpIndex)
     , m_initialized(false)
+    , m_emuHandle(INVALID_HANDLE_VALUE)
+    , m_ioPortCallback(nullptr)
+    , m_memoryCallback(nullptr)
 {
 }
 
@@ -279,11 +283,11 @@ WHvVCPUStatus WHvVCPU::Close() {
     if (!m_initialized) {
         return WHVVCPUS_NOT_INITIALIZED;
     }
-
+    
     // Delete the VCPU
-    HRESULT hr = WHvDeleteVirtualProcessor(m_partitionHandle, m_vpIndex);
+    HRESULT hr = WHvEmulatorDestroyEmulator(m_emuHandle);
     if (S_OK != hr) {
-        return WHVVCPUS_CREATE_FAILED;
+        return WHVVCPUS_DESTROY_EMU_FAILED;
     }
 
     // Mark as uninitialized
@@ -303,6 +307,20 @@ WHvVCPUStatus WHvVCPU::Initialize() {
     if (S_OK != hr) {
         return WHVVCPUS_CREATE_FAILED;
     }
+    
+    WHV_EMULATOR_CALLBACKS callbacks;
+    callbacks.Size = sizeof(WHV_EMULATOR_CALLBACKS);
+    callbacks.Reserved = 0;
+    callbacks.WHvEmulatorGetVirtualProcessorRegisters = GetVirtualProcessorRegistersCallback;
+    callbacks.WHvEmulatorSetVirtualProcessorRegisters = SetVirtualProcessorRegistersCallback;
+    callbacks.WHvEmulatorTranslateGvaPage = TranslateGvaPageCallback;
+    callbacks.WHvEmulatorIoPortCallback = IoPortCallback;
+    callbacks.WHvEmulatorMemoryCallback = MemoryCallback;
+    hr = WHvEmulatorCreateEmulator(&callbacks, &m_emuHandle);
+    if (S_OK != hr) {
+        WHvDeleteVirtualProcessor(m_partitionHandle, m_vpIndex);
+        return WHVVCPUS_CREATE_EMU_FAILED;
+    }
 
     // Mark as initialized
     m_initialized = true;
@@ -314,7 +332,34 @@ WHvVCPUStatus WHvVCPU::Run() {
     // Run the virtual processor
     HRESULT hr = WHvRunVirtualProcessor(m_partitionHandle, m_vpIndex, &m_exitContext, sizeof(m_exitContext));
     if (S_OK != hr) {
-        return WHVVCPUS_FAILED;
+        return WHVVCPUS_RUN_FAILED;
+    }
+
+    switch (m_exitContext.ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+    {
+        WHV_EMULATOR_STATUS emuStatus;
+        hr = WHvEmulatorTryIoEmulation(m_emuHandle, this, &m_exitContext.VpContext, &m_exitContext.IoPortAccess, &emuStatus);
+        if (S_OK != hr) {
+            return WHVVCPUS_EMULATION_FAILED;
+        }
+        if (!emuStatus.EmulationSuccessful) {
+            return WHVVCPUS_EMULATION_FAILED;
+        }
+        break;
+    }
+    case WHvRunVpExitReasonMemoryAccess:
+    {
+        WHV_EMULATOR_STATUS emuStatus;
+        hr = WHvEmulatorTryMmioEmulation(m_emuHandle, this, &m_exitContext.VpContext, &m_exitContext.MemoryAccess, &emuStatus);
+        if (S_OK != hr) {
+            return WHVVCPUS_EMULATION_FAILED;
+        }
+        if (!emuStatus.EmulationSuccessful) {
+            return WHVVCPUS_EMULATION_FAILED;
+        }
+        break;
+    }
     }
 
     return WHVVCPUS_SUCCESS;
@@ -330,7 +375,7 @@ WHvVCPUStatus WHvVCPU::CancelRun() {
     return WHVVCPUS_SUCCESS;
 }
 
-WHvVCPUStatus WHvVCPU::GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values) {
+WHvVCPUStatus WHvVCPU::GetRegisters(const WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values) {
     // Get specified registers
     HRESULT hr = WHvGetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
     if (S_OK != hr) {
@@ -340,7 +385,7 @@ WHvVCPUStatus WHvVCPU::GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_R
     return WHVVCPUS_SUCCESS;
 }
 
-WHvVCPUStatus WHvVCPU::SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values) {
+WHvVCPUStatus WHvVCPU::SetRegisters(const WHV_REGISTER_NAME *regs, UINT32 count, const WHV_REGISTER_VALUE *values) {
     // Set specified registers
     HRESULT hr = WHvSetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
     if (S_OK != hr) {
@@ -371,4 +416,50 @@ WHvVCPUStatus WHvVCPU::Interrupt(uint16_t vector) {
     }
 
     return WHVVCPUS_SUCCESS;
+}
+
+HRESULT WHvVCPU::GetVirtualProcessorRegistersCallback(
+    VOID* Context,
+    const WHV_REGISTER_NAME* RegisterNames,
+    UINT32 RegisterCount,
+    WHV_REGISTER_VALUE* RegisterValues
+) {
+    WHvVCPU *vcpu = (WHvVCPU *) Context;
+    return WHvGetVirtualProcessorRegisters(vcpu->m_partitionHandle, vcpu->m_vpIndex, RegisterNames, RegisterCount, RegisterValues);
+}
+
+HRESULT WHvVCPU::SetVirtualProcessorRegistersCallback(
+    VOID* Context,
+    const WHV_REGISTER_NAME* RegisterNames,
+    UINT32 RegisterCount,
+    const WHV_REGISTER_VALUE* RegisterValues
+) {
+    WHvVCPU *vcpu = (WHvVCPU *) Context;
+    return WHvSetVirtualProcessorRegisters(vcpu->m_partitionHandle, vcpu->m_vpIndex, RegisterNames, RegisterCount, RegisterValues);
+}
+
+HRESULT WHvVCPU::TranslateGvaPageCallback(VOID* Context, WHV_GUEST_VIRTUAL_ADDRESS Gva, WHV_TRANSLATE_GVA_FLAGS TranslateFlags, WHV_TRANSLATE_GVA_RESULT_CODE* TranslationResult, WHV_GUEST_PHYSICAL_ADDRESS* Gpa) {
+    WHvVCPU *vcpu = (WHvVCPU *)Context;
+    WHV_TRANSLATE_GVA_RESULT result;
+    HRESULT hr = WHvTranslateGva(vcpu->m_partitionHandle, vcpu->m_vpIndex, Gva, TranslateFlags, &result, Gpa);
+    if (S_OK == hr) {
+        *TranslationResult = result.ResultCode;
+    }
+    return hr;
+}
+
+HRESULT WHvVCPU::IoPortCallback(VOID *Context, WHV_EMULATOR_IO_ACCESS_INFO *IoAccess) {
+    WHvVCPU *vcpu = (WHvVCPU *)Context;
+    if (vcpu->m_ioPortCallback == nullptr) {
+        return E_NOTIMPL;
+    }
+    return vcpu->m_ioPortCallback(IoAccess);
+}
+
+HRESULT WHvVCPU::MemoryCallback(VOID *Context, WHV_EMULATOR_MEMORY_ACCESS_INFO *MemoryAccess) {
+    WHvVCPU *vcpu = (WHvVCPU *)Context;
+    if (vcpu->m_memoryCallback == nullptr) {
+        return E_NOTIMPL;
+    }
+    return vcpu->m_memoryCallback(MemoryAccess);
 }
