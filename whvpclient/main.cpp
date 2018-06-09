@@ -23,7 +23,7 @@ LPVOID allocateMemory(const uint32_t size) {
 int main() {
     // Initialize ROM and RAM
     const uint32_t romSize = PAGE_SIZE * 16;  // 64 KiB
-    const uint32_t ramSize = PAGE_SIZE * 256; //  1 MiB
+    const uint32_t ramSize = PAGE_SIZE * 240; // 960 KiB
 
     LPVOID rom = allocateMemory(romSize);
     if (rom == NULL) {
@@ -214,7 +214,7 @@ int main() {
             emit(rom, "\xf4");                         // [0xffe7..0xffef] hlt
         }
 #else
-        emit(rom, "\x66\xea\x00\xff\xff\xff\x08\x00"); // [0xffe6] jmp    dword 0x8:0xffffff00
+        emit(rom, "\x66\xea\x00\xff\x0f\x00\x08\x00"); // [0xffe6] jmp    dword 0x8:0x000fff00
         emit(rom, "\xf4");                             // [0xffef] hlt
 #endif
 
@@ -228,8 +228,8 @@ int main() {
 #else
         emit(rom, "\xeb\xde");                         // [0xfff0] jmp    short 0x1d0
 #endif
-        emit(rom, "\x18\x00\x00\x00\xff\xff");         // [0xfff2] GDT pointer: 0xffff0000:0x0018
-        emit(rom, "\x10\x01\x18\x00\xff\xff");         // [0xfff8] IDT pointer: 0xffff0018:0x0110
+        emit(rom, "\x18\x00\x00\x00\x0f\x00");         // [0xfff2] GDT pointer: 0x000f0000:0x0018
+        emit(rom, "\x10\x01\x18\x00\x0f\x00");         // [0xfff8] IDT pointer: 0x000f0018:0x0110
         // There's room for two bytes at the end, so let's fill it up with HLTs
         emit(rom, "\xf4");                             // [0xfffe] hlt
         emit(rom, "\xf4");                             // [0xffff] hlt
@@ -374,7 +374,7 @@ int main() {
     printf("Partition setup completed\n");
 
     // Map ROM to the top of the 32-bit address range
-    partStatus = partition->MapGpaRange(rom, 0x100000000L - romSize, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
+    partStatus = partition->MapGpaRange(rom, 0xF0000, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
     if (WHVPS_SUCCESS != partStatus) {
         printf("Failed to map guest physical address range for ROM\n");
         return -1;
@@ -427,9 +427,9 @@ int main() {
         }
 
         // Validate first stop output
-        if (out[1].Reg32 == 0xffffffc3 && out[0].Segment.Selector == 0x0008) {
+        if (out[1].Reg32 == 0xfffc3 && out[0].Segment.Selector == 0x0008) {
             printf("Emulation stopped at the right place!\n");
-            if (out[0].Reg32 == 0xdeadbeef) {
+            if (out[2].Reg32 == 0xdeadbeef) {
                 printf("And we got the right result!\n");
             }
         }
