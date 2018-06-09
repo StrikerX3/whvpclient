@@ -35,6 +35,8 @@ enum WHvVCPUStatus {
     WHVVCPUS_ALREADY_INITIALIZED,        // Attempted to create an initialized VCPU
     WHVVCPUS_INVALID_POINTER,            // An invalid pointer to a VCPU was passed to a function
     WHVVCPUS_INVALID_OWNER,              // Attempted to delete a VCPU that does not belong to the partition
+    WHVVCPUS_GET_REGS_FAILED,            // Failed to get registers
+    WHVVCPUS_SET_REGS_FAILED,            // Failed to set registers
 };
 
 
@@ -94,6 +96,8 @@ class WHvVCPU {
 public:
     WHvVCPUStatus Run();
     WHvVCPUStatus CancelRun();
+
+    WHvVCPUStatus Interrupt(uint16_t vector);
 
     WHvVCPUStatus GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
     WHvVCPUStatus SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);

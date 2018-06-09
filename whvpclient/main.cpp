@@ -823,6 +823,56 @@ int main() {
     printRegs(vcpu);
     printf("\n");
 
+
+    // Enable interrupts
+    {
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRflags,
+        };
+        WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
+
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+        
+        // Enable interrupts
+        vals[0].Reg32 |= 0x200;
+
+        vcpuStatus = vcpu->SetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to set VCPU registers\n");
+            return -1;
+        }
+    }
+
+    // Do an INT 0x21 from the host
+    vcpuStatus = vcpu->Interrupt(0x21);
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("Failed to inject interrupt\n");
+        return -1;
+    }
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64Halt:
+        printf("Emulation exited due to HLT instruction as expected!\n");
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 
     printf("\n");

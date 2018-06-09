@@ -334,7 +334,7 @@ WHvVCPUStatus WHvVCPU::GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_R
     // Get specified registers
     HRESULT hr = WHvGetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
     if (S_OK != hr) {
-        return WHVVCPUS_FAILED;
+        return WHVVCPUS_GET_REGS_FAILED;
     }
 
     return WHVVCPUS_SUCCESS;
@@ -344,7 +344,30 @@ WHvVCPUStatus WHvVCPU::SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_R
     // Set specified registers
     HRESULT hr = WHvSetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
     if (S_OK != hr) {
-        return WHVVCPUS_FAILED;
+        return WHVVCPUS_SET_REGS_FAILED;
+    }
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvVCPU::Interrupt(uint16_t vector) {
+    WHV_REGISTER_NAME regs[] = {
+        WHvRegisterPendingInterruption,
+    };
+    WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
+    WHvVCPUStatus vcpuStatus = GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        return vcpuStatus;
+    }
+
+    // Setup the interrupt
+    vals[0].PendingInterruption.InterruptionPending = TRUE;
+    vals[0].PendingInterruption.InterruptionType = WHvX64PendingInterrupt;
+    vals[0].PendingInterruption.InterruptionVector = vector;
+
+    vcpuStatus = SetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        return vcpuStatus;
     }
 
     return WHVVCPUS_SUCCESS;
