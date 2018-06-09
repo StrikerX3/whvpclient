@@ -162,3 +162,33 @@ WHvPartitionStatus WHvPartition::Setup() {
 
     return WHVPS_SUCCESS;
 }
+
+WHvPartitionStatus WHvPartition::MapGpaRange(void *memory, WHV_GUEST_PHYSICAL_ADDRESS address, UINT64 size, WHV_MAP_GPA_RANGE_FLAGS flags) {
+    // Check if the handle is valid
+    if (m_handle == INVALID_HANDLE_VALUE) {
+        return WHVPS_UNINITIALIZED;
+    }
+
+    // Map the memory to the specified guest physical address range
+    HRESULT hr = WHvMapGpaRange(m_handle, memory, address, size, flags);
+    if (S_OK != hr) {
+        return WHVPS_FAILED;
+    }
+
+    return WHVPS_SUCCESS;
+}
+
+WHvPartitionStatus WHvPartition::UnmapGpaRange(WHV_GUEST_PHYSICAL_ADDRESS address, UINT64 size) {
+    // Check if the handle is valid
+    if (m_handle == INVALID_HANDLE_VALUE) {
+        return WHVPS_UNINITIALIZED;
+    }
+
+    // Unmaps the specified guest physical address range
+    HRESULT hr = WHvUnmapGpaRange(m_handle, address, size);
+    if (S_OK != hr) {
+        return WHVPS_FAILED;
+    }
+
+    return WHVPS_SUCCESS;
+}

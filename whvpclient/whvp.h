@@ -53,7 +53,11 @@ class WHvPartition {
 public:
     WHvPartitionStatus GetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty);
     WHvPartitionStatus SetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty);
+    
     WHvPartitionStatus Setup();
+
+    WHvPartitionStatus MapGpaRange(void *memory, WHV_GUEST_PHYSICAL_ADDRESS address, UINT64 size, WHV_MAP_GPA_RANGE_FLAGS flags);
+    WHvPartitionStatus UnmapGpaRange(WHV_GUEST_PHYSICAL_ADDRESS address, UINT64 size);
 
     WHvPartitionStatus Close();
 

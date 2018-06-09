@@ -320,6 +320,8 @@ int main() {
 #undef emit
     }
 
+    // ----- Hypervisor platform initialization -------------------------------------------------------------------------------
+
     // Initialize the hypervisor platform
     WinHvPlatform whvp;
     if (whvp.IsPresent()) {
@@ -372,14 +374,38 @@ int main() {
     printf("Partition setup completed\n");
 
     // Map ROM to the top of the 32-bit address range
-    /*hr = WHvMapGpaRange(hPartition, rom, 0x100000000L - romSize, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
-    if (S_OK != hr) {
-        printf("Failed to map guest physical address range: 0x%x\n", hr);
+    partStatus = partition->MapGpaRange(rom, 0x100000000L - romSize, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
+    if (WHVPS_SUCCESS != partStatus) {
+        printf("Failed to map guest physical address range for ROM\n");
         return -1;
     }
+    printf("Mapped ROM to top of 32-bit address range\n");
 
-    printf("Mapped ROM to top of 32-bit address range\n");*/
+    // Map RAM to the bottom of the 32-bit address range
+    partStatus = partition->MapGpaRange(ram, 0, ramSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
+    if (WHVPS_SUCCESS != partStatus) {
+        printf("Failed to map guest physical address range for RAM\n");
+        return -1;
+    }
+    printf("Mapped RAM to bottom of 32-bit address range\n");
 
+    // ----- Start of emulation -----------------------------------------------------------------------------------------------
+
+
+
+    // ----- Cleanup ----------------------------------------------------------------------------------------------------------
+
+    printf("\n");
+    
+    // Free RAM
+    if (!VirtualFree(ram, 0, MEM_RELEASE)) {
+        printf("Failed to free RAM memory: error code %d\n", GetLastError());
+    }
+    else {
+        printf("RAM memory freed\n");
+    }
+
+    // Free ROM
     if (!VirtualFree(rom, 0, MEM_RELEASE)) {
         printf("Failed to free ROM memory: error code %d\n", GetLastError());
     }
