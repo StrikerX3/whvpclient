@@ -121,7 +121,7 @@ int main() {
         // Prepare memory for paging
         // 0x1000 = Page directory
         // 0x2000 = Page table (identity map RAM: 0x000xxxxx)
-        // 0x3000 = Page table (identity map ROM: 0xffffxxxx)
+        // 0x3000 = Page table (identity map ROM: 0x000fxxxx)
         // 0x4000 = Page table (0x10000xxx .. 0x10001xxx -> 0x00005xxx .. 0x00006xxx)
         // 0x5000 = Data area (first dword reads 0xdeadbeef)
         // 0x6000 = Interrupt handler code area
@@ -152,7 +152,7 @@ int main() {
         emit(rom, "\x89\x07");                         // [0xff22] mov    [edi], eax
 
         // Identity map the RAM to 0x00000000
-        emit(rom, "\xb9\x00\x01\x00\x00");             // [0xff24] mov    ecx, 0x100
+        emit(rom, "\xb9\x00\x01\x00\x00");             // [0xff24] mov    ecx, 0xf0
         emit(rom, "\xbf\x00\x20\x00\x00");             // [0xff29] mov    edi, 0x2000
         emit(rom, "\xb8\x03\x00\x00\x00");             // [0xff2e] mov    eax, 0x0003
                                                        // aLoop:
@@ -274,7 +274,7 @@ int main() {
 
         // Setup a proper stack
         emit(ram, "\x31\xed");                         // [0x5013] xor    ebp, ebp
-        emit(ram, "\xbc\x00\x00\x10\x00");             // [0x5015] mov    esp, 0x100000
+        emit(ram, "\xbc\x00\x00\x0f\x00");             // [0x5015] mov    esp, 0xf0000
 
         // Test the stack
         emit(ram, "\x68\xfe\xca\x0d\xf0");             // [0x501a] push   0xf00dcafe
@@ -576,7 +576,7 @@ int main() {
         *(uint32_t *)&ram[0x5000] = 0xdeadbeef;
 
         // Identity map the RAM to 0x00000000
-        for (uint32_t i = 0; i < 0x100; i++) {
+        for (uint32_t i = 0; i < 0xf0; i++) {
             *(uint32_t *)&ram[0x2000 + i * 4] = 0x0003 + i * 0x1000;
         }
 
@@ -682,6 +682,55 @@ int main() {
             printf("Emulation stopped at the right place!\n");
             uint32_t memValue = *(uint32_t *)&ram[0x5000];
             if (out[1].Reg32 == 0xcc99e897 && out[2].Reg32 == 0x12345678 && memValue == 0xcc99e897) {
+                printf("And we got the right result!\n");
+            }
+        }
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+    
+    // ----- Stack ------------------------------------------------------------------------------------------------------------
+
+    printf("Testing the stack\n\n");
+
+    // Run CPU once more
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64Halt:
+        printf("Emulation exited due to HLT instruction as expected!\n");
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    // Validate stack results
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRip,
+            WHvX64RegisterRdx,
+            WHvX64RegisterRsp,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Validate
+        if (out[0].Reg32 == 0x10000021) {
+            printf("Emulation stopped at the right place!\n");
+            uint32_t memValue = *(uint32_t *)&ram[0xefffc];
+            if (out[1].Reg32 == 0xf00dcafe && out[2].Reg32 == 0x000f0000 && memValue == 0xf00dcafe) {
                 printf("And we got the right result!\n");
             }
         }
