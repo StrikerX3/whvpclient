@@ -876,48 +876,48 @@ int main() {
 
     printf("Testing PMIO\n\n");
 
-    // Set callbacks to validate inputs and outputs
+    // Set callback to validate inputs and outputs
     vcpu->SetIoPortCallback([](WHV_EMULATOR_IO_ACCESS_INFO *io) -> HRESULT {
         // 8-bit operations
-        if (io->Direction == 0 && io->Port == 0x1000 && io->AccessSize == 1) {
+        if (io->Direction == WHV_IO_IN && io->Port == 0x1000 && io->AccessSize == 1) {
             printf("Received I/O port callback for reading 8 bits from the correct address!\n");
             io->Data = 0xac;
             return S_OK;
         }
-        if (io->Direction == 1 && io->Port == 0x1001 && io->AccessSize == 1) {
+        if (io->Direction == WHV_IO_OUT && io->Port == 0x1001 && io->AccessSize == 1) {
             printf("Received I/O port callback for writing 8 bits to the correct address!\n");
             if (io->Data == 0x53) {
                 printf("And the value was correct!\n");
+                return S_OK;
             }
-            return S_OK;
         }
 
         // 16-bit operations
-        if (io->Direction == 0 && io->Port == 0x1002 && io->AccessSize == 2) {
+        if (io->Direction == WHV_IO_IN && io->Port == 0x1002 && io->AccessSize == 2) {
             printf("Received I/O port callback for reading 16 bits from the correct address!\n");
             io->Data = 0xfade;
             return S_OK;
         }
-        if (io->Direction == 1 && io->Port == 0x1003 && io->AccessSize == 2) {
+        if (io->Direction == WHV_IO_OUT && io->Port == 0x1003 && io->AccessSize == 2) {
             printf("Received I/O port callback for writing 16 bits to the correct address!\n");
             if (io->Data == 0x0521) {
                 printf("And the value was correct!\n");
+                return S_OK;
             }
-            return S_OK;
         }
 
         // 32-bit operations
-        if (io->Direction == 0 && io->Port == 0x1004 && io->AccessSize == 4) {
+        if (io->Direction == WHV_IO_IN && io->Port == 0x1004 && io->AccessSize == 4) {
             printf("Received I/O port callback for reading 32 bits from the correct address!\n");
             io->Data = 0xfeedbabe;
             return S_OK;
         }
-        if (io->Direction == 1 && io->Port == 0x1005 && io->AccessSize == 4) {
+        if (io->Direction == WHV_IO_OUT && io->Port == 0x1005 && io->AccessSize == 4) {
             printf("Received I/O port callback for writing 32 bits to the correct address!\n");
             if (io->Data == 0x01124541) {
                 printf("And the value was correct!\n");
+                return S_OK;
             }
-            return S_OK;
         }
 
         return E_INVALIDARG;
@@ -1061,6 +1061,141 @@ int main() {
     default:
         printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
         break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+    
+    // ----- MMIO -------------------------------------------------------------------------------------------------------------
+
+    printf("Testing MMIO\n\n");
+
+    // Set callback to validate inputs and outputs
+    vcpu->SetMemoryCallback([](WHV_EMULATOR_MEMORY_ACCESS_INFO *mem) -> HRESULT {
+        // Read from 0xE0000000
+        if (mem->Direction == WHV_IO_IN && mem->GpaAddress == 0xE0000000 && mem->AccessSize == 4) {
+            printf("Received MMIO callback for reading 32 bits from the correct address!\n");
+            *(uint32_t *)&mem->Data = 0xbaadc0de;
+            return S_OK;
+        }
+
+        // Write to 0xE0000004
+        if (mem->Direction == WHV_IO_OUT && mem->GpaAddress == 0xE0000004 && mem->AccessSize == 4) {
+            printf("Received MMIO callback for writing 32 bits to the correct address!\n");
+            if (*(uint32_t *)&mem->Data == 0xbaadc0de) {
+                printf("And the value was correct!\n");
+                return S_OK;
+            }
+        }
+
+        // Read from 0xE0000004
+        if (mem->Direction == WHV_IO_IN && mem->GpaAddress == 0xE0000004 && mem->AccessSize == 4) {
+            printf("Received MMIO callback for reading 32 bits from the correct address!\n");
+            *(uint32_t *)&mem->Data = 0xdeadfeed;
+            return S_OK;
+        }
+        return E_INVALIDARG;
+    });
+
+
+    // Run CPU. Will stop at the MMIO read from 0xE0000000
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonMemoryAccess:
+        printf("Emulation exited due to MMIO as expected!\n");
+        if (exitCtx->MemoryAccess.AccessInfo.AccessType == WHvMemoryAccessRead && exitCtx->MemoryAccess.Gpa == 0xE0000000) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU. Will stop at the MMIO write to 0xE0000004
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonMemoryAccess:
+        printf("Emulation exited due to MMIO as expected!\n");
+        if (exitCtx->MemoryAccess.AccessInfo.AccessType == WHvMemoryAccessWrite && exitCtx->MemoryAccess.Gpa == 0xE0000004) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU. Will stop at the MMIO read from 0xE0000004
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonMemoryAccess:
+        printf("Emulation exited due to MMIO as expected!\n");
+        if (exitCtx->MemoryAccess.AccessInfo.AccessType == WHvMemoryAccessRead && exitCtx->MemoryAccess.Gpa == 0xE0000004) {
+            printf("And we got the right address and direction!\n");
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+    // ----- End of the program -----------------------------------------------------------------------------------------------
+
+    // Run CPU. Will stop at the last HLT instruction
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    // Validate registers
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRip,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Validate
+        if (out[0].Reg32 == 0x10000059) {
+            printf("Emulation stopped at the right place!\n");
+        }
     }
 
     printf("\nCPU register state:\n");

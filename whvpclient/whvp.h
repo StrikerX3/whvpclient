@@ -45,6 +45,10 @@ enum WHvVCPUStatus {
 };
 
 
+#define WHV_IO_IN  0
+#define WHV_IO_OUT 1
+
+
 class WHvPartition;
 class WHvVCPU;
 
