@@ -12,12 +12,12 @@
 //#define DO_MANUAL_JMP
 //#define DO_MANUAL_PAGING
 
-LPVOID allocateMemory(const uint32_t size) {
+uint8_t *allocateMemory(const uint32_t size) {
     LPVOID mem = VirtualAlloc(NULL, size, MEM_RESERVE, PAGE_READWRITE);
     if (mem == NULL) {
         return NULL;
     }
-    return VirtualAlloc(mem, size, MEM_COMMIT, PAGE_READWRITE);
+    return (uint8_t *)VirtualAlloc(mem, size, MEM_COMMIT, PAGE_READWRITE);
 }
 
 int main() {
@@ -27,14 +27,14 @@ int main() {
     const UINT64 romBase = 0xF0000;
     const UINT64 ramBase = 0x0;
 
-    LPVOID rom = allocateMemory(romSize);
+    uint8_t *rom = allocateMemory(romSize);
     if (rom == NULL) {
         printf("Failed to allocate ROM memory: error code %d\n", GetLastError());
         return -1;
     }
     printf("ROM allocated: %u bytes\n", romSize);
 
-    LPVOID ram = allocateMemory(ramSize);
+    uint8_t *ram = allocateMemory(ramSize);
     if (ram == NULL) {
         printf("Failed to allocate RAM memory: error code %d\n", GetLastError());
         return -1;
@@ -50,7 +50,7 @@ int main() {
 
     {
         uint32_t addr;
-#define emit(buf, code) {memcpy((uint8_t*)buf + addr, code, sizeof(code) - 1); addr += sizeof(code) - 1;}
+#define emit(buf, code) {memcpy(&buf[addr], code, sizeof(code) - 1); addr += sizeof(code) - 1;}
 
         // --- Start of ROM code ----------------------------------------------------------------------------------------------
 
@@ -140,7 +140,7 @@ int main() {
         // Identity map the ROM
         emit(rom, "\xb9\x10\x00\x00\x00");             // [0xff3b] mov    ecx, 0x10
         emit(rom, "\xbf\xc0\x3f\x00\x00");             // [0xff40] mov    edi, 0x3fc0
-        emit(rom, "\xb8\x03\x00\xff\xff");             // [0xff45] mov    eax, 0xffff0003
+        emit(rom, "\xb8\x03\x00\x0f\x00");             // [0xff45] mov    eax, 0xf0003
                                                        // bLoop:
         emit(rom, "\xab");                             // [0xff4a] stosd
         emit(rom, "\x05\x00\x10\x00\x00");             // [0xff4b] add    eax, 0x1000
@@ -475,11 +475,11 @@ int main() {
         uint64_t gdtEntry;
         if (vals[2].Table.Base >= ramBase && vals[2].Table.Base <= ramBase + ramSize - 1) {
             // GDT is in RAM
-            gdtEntry = *(uint64_t *)&((uint8_t*)ram)[vals[2].Table.Base - ramBase + vals[0].Segment.Selector];
+            gdtEntry = *(uint64_t *)&ram[vals[2].Table.Base - ramBase + vals[0].Segment.Selector];
         }
         else if (vals[2].Table.Base >= romBase && vals[2].Table.Base <= romBase + romSize - 1) {
             // GDT is in ROM
-            gdtEntry = *(uint64_t *)&((uint8_t*)rom)[vals[2].Table.Base - romBase + vals[0].Segment.Selector];
+            gdtEntry = *(uint64_t *)&rom[vals[2].Table.Base - romBase + vals[0].Segment.Selector];
         }
 
         // Fill in the rest of the CS info with data from the GDT entry
@@ -507,56 +507,78 @@ int main() {
 #endif
 
 #ifdef DO_MANUAL_PAGING
-    // Prepare the registers
-    vcpu->GetRegisters(&regs);
-    regs._eax = 0;
-    regs._esi = 0x10000000;
-    regs._eip = 0xffffffc0;
-    regs._cr0 = 0xe0000011;
-    regs._cr3 = 0x1000;
-    regs._ss.selector = regs._ds.selector = regs._es.selector = 0x0010;
-    regs._ss.limit = regs._ds.limit = regs._es.limit = 0xffffffff;
-    regs._ss.base = regs._ds.base = regs._es.base = 0;
-    regs._ss.ar = regs._ds.ar = regs._es.ar = 0xc093;
+    {
+        // Prepare the registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRax,
+            WHvX64RegisterRsi,
+            WHvX64RegisterRip,
+            WHvX64RegisterCr0,
+            WHvX64RegisterCr3,
+            WHvX64RegisterSs,
+            WHvX64RegisterDs,
+            WHvX64RegisterEs,
+        };
+        WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
 
-    vcpu->SetRegisters(&regs);
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+        vals[0].Reg32 = 0;
+        vals[1].Reg32 = 0x10000000;
+        vals[2].Reg32 = 0xfffc0;
+        vals[3].Reg32 = 0xe0000011;
+        vals[4].Reg32 = 0x1000;
+        vals[5].Segment.Selector = vals[6].Segment.Selector = vals[7].Segment.Selector = 0x0010;
+        vals[5].Segment.Limit = vals[6].Segment.Limit = vals[7].Segment.Limit = 0xffffffff;
+        vals[5].Segment.Base = vals[6].Segment.Base = vals[7].Segment.Base = 0;
+        vals[5].Segment.Attributes = vals[6].Segment.Attributes = vals[7].Segment.Attributes = 0xc093;
 
-    // Clear page directory
-    memset(&ram[0x1000], 0, 0x1000);
+        vcpuStatus = vcpu->SetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to set VCPU registers\n");
+            return -1;
+        }
 
-    // Write 0xdeadbeef at physical memory address 0x5000
-    *(uint32_t *)&ram[0x5000] = 0xdeadbeef;
+        // Clear page directory
+        memset(&ram[0x1000], 0, 0x1000);
 
-    // Identity map the RAM to 0x00000000
-    for (uint32_t i = 0; i < 0x100; i++) {
-        *(uint32_t *)&ram[0x2000 + i * 4] = 0x0003 + i * 0x1000;
-    }
+        // Write 0xdeadbeef at physical memory address 0x5000
+        *(uint32_t *)&ram[0x5000] = 0xdeadbeef;
 
-    // Identity map the ROM
-    for (uint32_t i = 0; i < 0x10; i++) {
-        *(uint32_t *)&ram[0x3fc0 + i * 4] = 0xffff0003 + i * 0x1000;
-    }
+        // Identity map the RAM to 0x00000000
+        for (uint32_t i = 0; i < 0x100; i++) {
+            *(uint32_t *)&ram[0x2000 + i * 4] = 0x0003 + i * 0x1000;
+        }
 
-    // Map physical address 0x5000 to virtual address 0x10000000
-    *(uint32_t *)&ram[0x4000] = 0x5003;
+        // Identity map the ROM
+        for (uint32_t i = 0; i < 0x10; i++) {
+            *(uint32_t *)&ram[0x3fc0 + i * 4] = 0xf0003 + i * 0x1000;
+        }
 
-    // Map physical address 0x6000 to virtual address 0x10001000
-    *(uint32_t *)&ram[0x4004] = 0x6003;
+        // Map physical address 0x5000 to virtual address 0x10000000
+        *(uint32_t *)&ram[0x4000] = 0x5003;
 
-    // Map physical address 0xe0000000 to virtual address 0xe0000000
-    *(uint32_t *)&ram[0xe000] = 0xe0000003;
+        // Map physical address 0x6000 to virtual address 0x10001000
+        *(uint32_t *)&ram[0x4004] = 0x6003;
 
-    // Add page tables into page directory
-    *(uint32_t *)&ram[0x1000] = 0x2003;
-    *(uint32_t *)&ram[0x1ffc] = 0x3003;
-    *(uint32_t *)&ram[0x1100] = 0x4003;
-    *(uint32_t *)&ram[0x1e00] = 0xe003;
+        // Map physical address 0xe0000000 to virtual address 0xe0000000
+        *(uint32_t *)&ram[0xe000] = 0xe0000003;
 
-    // Run the CPU again!
-    vcpuStatus = vcpu->Run();
-    if (WHVVCPUS_SUCCESS != vcpuStatus) {
-        printf("VCPU failed to run\n");
-        return -1;
+        // Add page tables into page directory
+        *(uint32_t *)&ram[0x1000] = 0x2003;
+        *(uint32_t *)&ram[0x1ffc] = 0x3003;
+        *(uint32_t *)&ram[0x1100] = 0x4003;
+        *(uint32_t *)&ram[0x1e00] = 0xe003;
+
+        // Run the CPU again!
+        vcpuStatus = vcpu->Run();
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("VCPU failed to run\n");
+            return -1;
+        }
     }
 #endif
 
