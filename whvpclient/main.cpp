@@ -412,8 +412,28 @@ int main() {
     }
 
     auto exitCtx = vcpu->ExitContext();
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterCs,
+            WHvX64RegisterRip,
+            WHvX64RegisterRax,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
 
-    
+        // Validate first stop output
+        if (out[1].Reg32 == 0xffffffc3 && out[0].Segment.Selector == 0x0008) {
+            printf("Emulation stopped at the right place!\n");
+            if (out[0].Reg32 == 0xdeadbeef) {
+                printf("And we got the right result!\n");
+            }
+        }
+    }
 
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 

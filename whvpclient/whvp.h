@@ -93,6 +93,10 @@ private:
 class WHvVCPU {
 public:
     WHvVCPUStatus Run();
+    WHvVCPUStatus CancelRun();
+
+    WHvVCPUStatus GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
+    WHvVCPUStatus SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values);
 
     WHvVCPUStatus Close();
 

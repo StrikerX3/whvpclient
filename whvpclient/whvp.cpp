@@ -319,3 +319,33 @@ WHvVCPUStatus WHvVCPU::Run() {
 
     return WHVVCPUS_SUCCESS;
 }
+
+WHvVCPUStatus WHvVCPU::CancelRun() {
+    // Cancel the virtual processor execution
+    HRESULT hr = WHvCancelRunVirtualProcessor(m_partitionHandle, m_vpIndex, 0);
+    if (S_OK != hr) {
+        return WHVVCPUS_FAILED;
+    }
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvVCPU::GetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values) {
+    // Get specified registers
+    HRESULT hr = WHvGetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
+    if (S_OK != hr) {
+        return WHVVCPUS_FAILED;
+    }
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvVCPU::SetRegisters(WHV_REGISTER_NAME *regs, UINT32 count, WHV_REGISTER_VALUE *values) {
+    // Set specified registers
+    HRESULT hr = WHvSetVirtualProcessorRegisters(m_partitionHandle, m_vpIndex, regs, count, values);
+    if (S_OK != hr) {
+        return WHVVCPUS_FAILED;
+    }
+
+    return WHVVCPUS_SUCCESS;
+}
