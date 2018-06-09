@@ -1,5 +1,4 @@
-# whvpclient
-Windows Hypervisor Platform client
+# Windows Hypervisor Platform client
 
 Playing around with [Windows Hypervisor Platform](https://docs.microsoft.com/en-us/virtualization/api/).
 
