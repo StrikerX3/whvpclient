@@ -872,6 +872,61 @@ int main() {
     printRegs(vcpu);
     printf("\n");
 
+    // ----- PMIO -------------------------------------------------------------------------------------------------------------
+
+    printf("Testing PMIO\n\n");
+    
+    // Run CPU until 8-bit IN
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == FALSE && exitCtx->IoPortAccess.PortNumber == 0x1000 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 1) {
+            printf("And we got the right address and direction!\n");
+            // TODO: instruction emulation
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Run CPU until 8-bit OUT
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64IoPortAccess:
+        printf("Emulation exited due to PMIO as expected!\n");
+        if (exitCtx->IoPortAccess.AccessInfo.IsWrite == TRUE && exitCtx->IoPortAccess.PortNumber == 0x1001 && exitCtx->IoPortAccess.AccessInfo.AccessSize == 1) {
+            printf("And we got the right address and direction!\n");
+            // TODO: instruction emulation
+            if (exitCtx->IoPortAccess.Rax == 0x53) {
+                printf("And the right result too!\n");
+            }
+        }
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
 
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 
