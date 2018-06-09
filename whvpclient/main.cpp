@@ -8,7 +8,7 @@
 
 #define PAGE_SIZE 0x1000
 
-#define DO_MANUAL_INIT
+//#define DO_MANUAL_INIT
 //#define DO_MANUAL_JMP
 //#define DO_MANUAL_PAGING
 
@@ -24,6 +24,8 @@ int main() {
     // Initialize ROM and RAM
     const uint32_t romSize = PAGE_SIZE * 16;  // 64 KiB
     const uint32_t ramSize = PAGE_SIZE * 240; // 960 KiB
+    const UINT64 romBase = 0xF0000;
+    const UINT64 ramBase = 0x0;
 
     LPVOID rom = allocateMemory(romSize);
     if (rom == NULL) {
@@ -374,7 +376,7 @@ int main() {
     printf("Partition setup completed\n");
 
     // Map ROM to the top of the 32-bit address range
-    partStatus = partition->MapGpaRange(rom, 0xF0000, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
+    partStatus = partition->MapGpaRange(rom, romBase, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
     if (WHVPS_SUCCESS != partStatus) {
         printf("Failed to map guest physical address range for ROM\n");
         return -1;
@@ -382,7 +384,7 @@ int main() {
     printf("Mapped ROM to top of 32-bit address range\n");
 
     // Map RAM to the bottom of the 32-bit address range
-    partStatus = partition->MapGpaRange(ram, 0, ramSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
+    partStatus = partition->MapGpaRange(ram, ramBase, ramSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagWrite | WHvMapGpaRangeFlagExecute);
     if (WHVPS_SUCCESS != partStatus) {
         printf("Failed to map guest physical address range for RAM\n");
         return -1;
@@ -416,11 +418,11 @@ int main() {
         }
 
         // Load GDT table
-        vals[0].Table.Base = 0xf0000;
+        vals[0].Table.Base = romBase;
         vals[0].Table.Limit = 0x0018;
 
         // Load IDT table
-        vals[1].Table.Base = 0xf0018;
+        vals[1].Table.Base = romBase + 0x18;
         vals[1].Table.Limit = 0x0110;
 
         // Enter protected mode
@@ -448,6 +450,119 @@ int main() {
         printf("VCPU failed to run\n");
         return -1;
     }
+
+#ifdef DO_MANUAL_JMP
+    {
+        // Do the jmp dword 0x8:0xffffff00 manually
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterCs,
+            WHvX64RegisterRip,
+            WHvX64RegisterGdtr,
+        };
+        WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
+
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Set basic register data
+        vals[0].Segment.Selector = 0x0008;
+        vals[1].Reg32 = 0xfff00;
+
+        // Find GDT entry in memory
+        uint64_t gdtEntry;
+        if (vals[2].Table.Base >= ramBase && vals[2].Table.Base <= ramBase + ramSize - 1) {
+            // GDT is in RAM
+            gdtEntry = *(uint64_t *)&((uint8_t*)ram)[vals[2].Table.Base - ramBase + vals[0].Segment.Selector];
+        }
+        else if (vals[2].Table.Base >= romBase && vals[2].Table.Base <= romBase + romSize - 1) {
+            // GDT is in ROM
+            gdtEntry = *(uint64_t *)&((uint8_t*)rom)[vals[2].Table.Base - romBase + vals[0].Segment.Selector];
+        }
+
+        // Fill in the rest of the CS info with data from the GDT entry
+        vals[0].Segment.Attributes = ((gdtEntry >> 40) & 0xf0ff);
+        vals[0].Segment.Base = ((gdtEntry >> 16) & 0xfffff) | (((gdtEntry >> 56) & 0xff) << 20);
+        vals[0].Segment.Limit = ((gdtEntry & 0xffff) | (((gdtEntry >> 48) & 0xf) << 16));
+        if (vals[0].Segment.Attributes & 0x8000) {
+            // 4 KB pages
+            vals[0].Segment.Limit = (vals[0].Segment.Limit << 12) | 0xfff;
+        }
+
+        vcpuStatus = vcpu->SetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to set VCPU registers\n");
+            return -1;
+        }
+    }
+
+    // Run the CPU again!
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+#endif
+
+#ifdef DO_MANUAL_PAGING
+    // Prepare the registers
+    vcpu->GetRegisters(&regs);
+    regs._eax = 0;
+    regs._esi = 0x10000000;
+    regs._eip = 0xffffffc0;
+    regs._cr0 = 0xe0000011;
+    regs._cr3 = 0x1000;
+    regs._ss.selector = regs._ds.selector = regs._es.selector = 0x0010;
+    regs._ss.limit = regs._ds.limit = regs._es.limit = 0xffffffff;
+    regs._ss.base = regs._ds.base = regs._es.base = 0;
+    regs._ss.ar = regs._ds.ar = regs._es.ar = 0xc093;
+
+    vcpu->SetRegisters(&regs);
+
+    // Clear page directory
+    memset(&ram[0x1000], 0, 0x1000);
+
+    // Write 0xdeadbeef at physical memory address 0x5000
+    *(uint32_t *)&ram[0x5000] = 0xdeadbeef;
+
+    // Identity map the RAM to 0x00000000
+    for (uint32_t i = 0; i < 0x100; i++) {
+        *(uint32_t *)&ram[0x2000 + i * 4] = 0x0003 + i * 0x1000;
+    }
+
+    // Identity map the ROM
+    for (uint32_t i = 0; i < 0x10; i++) {
+        *(uint32_t *)&ram[0x3fc0 + i * 4] = 0xffff0003 + i * 0x1000;
+    }
+
+    // Map physical address 0x5000 to virtual address 0x10000000
+    *(uint32_t *)&ram[0x4000] = 0x5003;
+
+    // Map physical address 0x6000 to virtual address 0x10001000
+    *(uint32_t *)&ram[0x4004] = 0x6003;
+
+    // Map physical address 0xe0000000 to virtual address 0xe0000000
+    *(uint32_t *)&ram[0xe000] = 0xe0000003;
+
+    // Add page tables into page directory
+    *(uint32_t *)&ram[0x1000] = 0x2003;
+    *(uint32_t *)&ram[0x1ffc] = 0x3003;
+    *(uint32_t *)&ram[0x1100] = 0x4003;
+    *(uint32_t *)&ram[0x1e00] = 0xe003;
+
+    // Run the CPU again!
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+#endif
+
+    // ----- First part -------------------------------------------------------------------------------------------------------
+    
+    printf("Testing data in virtual memory\n\n");
 
     auto exitCtx = vcpu->ExitContext();
     {
