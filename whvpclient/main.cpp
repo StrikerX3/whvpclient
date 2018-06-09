@@ -364,7 +364,7 @@ int main() {
         return -1;
     }
     printf("Set processor count to %u\n", partitionProperty.ProcessorCount);
-    
+
     // Setup the partition
     partStatus = partition->Setup();
     if (WHVPS_SUCCESS != partStatus) {
@@ -389,9 +389,31 @@ int main() {
     }
     printf("Mapped RAM to bottom of 32-bit address range\n");
 
+    // Create a VCPU
+    WHvVCPU *vcpu;
+    const UINT32 vpIndex = 0;
+    WHvVCPUStatus vcpuStatus = partition->CreateVCPU(&vcpu, vpIndex);
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("Failed to create VCPU\n");
+        return -1;
+    }
+    printf("VCPU created with virtual processor index %u\n", vpIndex);
+
     // ----- Start of emulation -----------------------------------------------------------------------------------------------
 
+    // The CPU starts in 16-bit real mode.
+    // Memory addressing is based on segments and offsets, where a segment is basically a 16-byte offset.
+    
+    // Run the CPU!
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
 
+    auto exitCtx = vcpu->ExitContext();
+
+    
 
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 

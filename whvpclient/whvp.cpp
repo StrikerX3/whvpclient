@@ -35,7 +35,7 @@ WHvStatus WinHvPlatform::GetCapability(WHV_CAPABILITY_CODE code, WHV_CAPABILITY 
     return WHVS_SUCCESS;
 }
 
-WHvPartitionStatus WinHvPlatform::CreatePartition(WHvPartition **pPartition) {
+WHvPartitionStatus WinHvPlatform::CreatePartition(WHvPartition **ppPartition) {
     // Create and initialize the partition
     WHvPartition *partition = new WHvPartition(this);
     WHvPartitionStatus status = partition->Initialize();
@@ -46,42 +46,42 @@ WHvPartitionStatus WinHvPlatform::CreatePartition(WHvPartition **pPartition) {
 
     // Add it to the vector so that we can clean up later
     m_partitions.push_back(partition);
-    *pPartition = partition;
+    *ppPartition = partition;
 
     return WHVPS_SUCCESS;
 }
 
-WHvPartitionStatus WinHvPlatform::DeletePartition(WHvPartition **pPartition) {
+WHvPartitionStatus WinHvPlatform::DeletePartition(WHvPartition **ppPartition) {
     // Null check the pointers
-    if (pPartition == nullptr) {
-        return WHVPS_INVALID_PARTITION;
+    if (ppPartition == nullptr) {
+        return WHVPS_INVALID_POINTER;
     }
-    if (*pPartition == nullptr) {
-        return WHVPS_INVALID_PARTITION;
+    if (*ppPartition == nullptr) {
+        return WHVPS_INVALID_POINTER;
     }
 
     // Make sure the partition was created by this platform object
-    if ((*pPartition)->m_platform != this) {
+    if ((*ppPartition)->m_platform != this) {
         return WHVPS_INVALID_OWNER;
     }
 
     // Try to close the partition
-    WHvPartitionStatus closeStatus = (*pPartition)->Close();
+    WHvPartitionStatus closeStatus = (*ppPartition)->Close();
     if (closeStatus != WHVPS_SUCCESS) {
         return closeStatus;
     }
 
     // Remove it from the clean up vector
     for (auto it = m_partitions.begin(); it != m_partitions.end(); it++) {
-        if (*it == *pPartition) {
+        if (*it == *ppPartition) {
             m_partitions.erase(it);
             break;
         }
     }
     
     // Delete and clear the pointer
-    delete *pPartition;
-    *pPartition = nullptr;
+    delete *ppPartition;
+    *ppPartition = nullptr;
     
     return WHVPS_SUCCESS;
 }
@@ -94,6 +94,13 @@ WHvPartition::WHvPartition(WinHvPlatform *platform)
 }
 
 WHvPartition::~WHvPartition() {
+    // Delete all VCPUs created with this partition
+    for (auto it = m_vcpus.begin(); it != m_vcpus.end(); it++) {
+        delete (*it);
+    }
+    m_vcpus.clear();
+
+    // Release resources bound to this partition
     Close();
 }
 
@@ -131,17 +138,29 @@ WHvPartitionStatus WHvPartition::Initialize() {
     return WHVPS_SUCCESS;
 }
 
-WHvPartitionStatus WHvPartition::GetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty) {
+WHvPartitionStatus WHvPartition::GetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *ppProperty) {
+    // Check if the handle is valid
+    if (m_handle == INVALID_HANDLE_VALUE) {
+        return WHVPS_UNINITIALIZED;
+    }
+
+    // Get the specified partition property
     UINT32 size;
-    HRESULT hr = WHvGetPartitionProperty(m_handle, code, pProperty, sizeof(WHV_PARTITION_PROPERTY), &size);
+    HRESULT hr = WHvGetPartitionProperty(m_handle, code, ppProperty, sizeof(WHV_PARTITION_PROPERTY), &size);
     if (S_OK != hr) {
         return WHVPS_FAILED;
     }
     return WHVPS_SUCCESS;
 }
 
-WHvPartitionStatus WHvPartition::SetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty) {
-    HRESULT hr = WHvSetPartitionProperty(m_handle, code, pProperty, sizeof(WHV_PARTITION_PROPERTY));
+WHvPartitionStatus WHvPartition::SetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *ppProperty) {
+    // Check if the handle is valid
+    if (m_handle == INVALID_HANDLE_VALUE) {
+        return WHVPS_UNINITIALIZED;
+    }
+
+    // Set the specified partition property
+    HRESULT hr = WHvSetPartitionProperty(m_handle, code, ppProperty, sizeof(WHV_PARTITION_PROPERTY));
     if (S_OK != hr) {
         return WHVPS_FAILED;
     }
@@ -191,4 +210,112 @@ WHvPartitionStatus WHvPartition::UnmapGpaRange(WHV_GUEST_PHYSICAL_ADDRESS addres
     }
 
     return WHVPS_SUCCESS;
+}
+
+WHvVCPUStatus WHvPartition::CreateVCPU(WHvVCPU **ppVcpu, UINT32 vpIndex) {
+    // Create and initialize the VCPU bound to this partition
+    WHvVCPU *vcpu = new WHvVCPU(m_handle, vpIndex);
+    WHvVCPUStatus status = vcpu->Initialize();
+    if (status != WHVVCPUS_SUCCESS) {
+        delete vcpu;
+        return status;
+    }
+
+    // Add it to the vector so that we can clean up later
+    m_vcpus.push_back(vcpu);
+    *ppVcpu = vcpu;
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvPartition::DeleteVCPU(WHvVCPU **ppVcpu) {
+    // Null check the pointers
+    if (ppVcpu == nullptr) {
+        return WHVVCPUS_INVALID_POINTER;
+    }
+    if (*ppVcpu == nullptr) {
+        return WHVVCPUS_INVALID_POINTER;
+    }
+
+    // Make sure the VCPU was created by this partition
+    if ((*ppVcpu)->m_partitionHandle != m_handle) {
+        return WHVVCPUS_INVALID_OWNER;
+    }
+
+    // Try to close the VCPU
+    WHvVCPUStatus closeStatus = (*ppVcpu)->Close();
+    if (closeStatus != WHVPS_SUCCESS) {
+        return closeStatus;
+    }
+
+    // Remove it from the clean up vector
+    for (auto it = m_vcpus.begin(); it != m_vcpus.end(); it++) {
+        if (*it == *ppVcpu) {
+            m_vcpus.erase(it);
+            break;
+        }
+    }
+
+    // Delete and clear the pointer
+    delete *ppVcpu;
+    *ppVcpu = nullptr;
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPU::WHvVCPU(WHV_PARTITION_HANDLE hPartition, UINT32 vpIndex)
+    : m_partitionHandle(hPartition)
+    , m_vpIndex(vpIndex)
+    , m_initialized(false)
+{
+}
+
+WHvVCPU::~WHvVCPU() {
+    Close();
+}
+
+WHvVCPUStatus WHvVCPU::Close() {
+    // Fail if the VCPU is not initialized
+    if (!m_initialized) {
+        return WHVVCPUS_NOT_INITIALIZED;
+    }
+
+    // Delete the VCPU
+    HRESULT hr = WHvDeleteVirtualProcessor(m_partitionHandle, m_vpIndex);
+    if (S_OK != hr) {
+        return WHVVCPUS_CREATE_FAILED;
+    }
+
+    // Mark as uninitialized
+    m_initialized = false;
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvVCPU::Initialize() {
+    // Fail if the VCPU is already initialized
+    if (m_initialized) {
+        return WHVVCPUS_ALREADY_INITIALIZED;
+    }
+
+    // Create the VCPU
+    HRESULT hr = WHvCreateVirtualProcessor(m_partitionHandle, m_vpIndex, 0);
+    if (S_OK != hr) {
+        return WHVVCPUS_CREATE_FAILED;
+    }
+
+    // Mark as initialized
+    m_initialized = true;
+
+    return WHVVCPUS_SUCCESS;
+}
+
+WHvVCPUStatus WHvVCPU::Run() {
+    // Run the virtual processor
+    HRESULT hr = WHvRunVirtualProcessor(m_partitionHandle, m_vpIndex, &m_exitContext, sizeof(m_exitContext));
+    if (S_OK != hr) {
+        return WHVVCPUS_FAILED;
+    }
+
+    return WHVVCPUS_SUCCESS;
 }
