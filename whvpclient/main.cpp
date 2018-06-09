@@ -20,6 +20,29 @@ uint8_t *allocateMemory(const uint32_t size) {
     return (uint8_t *)VirtualAlloc(mem, size, MEM_COMMIT, PAGE_READWRITE);
 }
 
+void printRegs(WHvVCPU *vcpu) {
+    WHV_REGISTER_NAME regs[] = {
+        WHvX64RegisterRax, WHvX64RegisterRbx, WHvX64RegisterRcx, WHvX64RegisterRdx, WHvX64RegisterRsi, WHvX64RegisterRdi, WHvX64RegisterEfer,
+        WHvX64RegisterCr0, WHvX64RegisterCr2, WHvX64RegisterCr3, WHvX64RegisterCr4, WHvX64RegisterRsp, WHvX64RegisterRbp, WHvX64RegisterGdtr,
+        WHvX64RegisterDr0, WHvX64RegisterDr1, WHvX64RegisterDr2, WHvX64RegisterDr3, WHvX64RegisterDr6, WHvX64RegisterDr7, WHvX64RegisterIdtr,
+        WHvX64RegisterCs, WHvX64RegisterDs, WHvX64RegisterEs, WHvX64RegisterFs, WHvX64RegisterGs, WHvX64RegisterSs, WHvX64RegisterTr, WHvX64RegisterLdtr,
+        WHvX64RegisterRip, WHvX64RegisterRflags,
+    };
+    WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
+
+    WHvVCPUStatus vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("Failed to retrieve VCPU registers\n");
+        return;
+    }
+
+    printf("EAX = %08x   EBX = %08x   ECX = %08x   EDX = %08x   ESI = %08x   EDI = %08x  EFER = %08x\n", vals[0].Reg32, vals[1].Reg32, vals[2].Reg32, vals[3].Reg32, vals[4].Reg32, vals[5].Reg32, vals[6].Reg32);
+    printf("CR0 = %08x   CR2 = %08x   CR3 = %08x   CR4 = %08x   ESP = %08x   EBP = %08x   GDT = %08x:%04x\n", vals[7].Reg32, vals[8].Reg32, vals[9].Reg32, vals[10].Reg32, vals[11].Reg32, vals[12].Reg32, vals[13].Table.Base, vals[13].Table.Limit);
+    printf("DR0 = %08x   DR1 = %08x   DR2 = %08x   DR3 = %08x   DR6 = %08x   DR7 = %08x   IDT = %08x:%04x\n", vals[14].Reg32, vals[15].Reg32, vals[16].Reg32, vals[17].Reg32, vals[18].Reg32, vals[19].Reg32, vals[20].Table.Base, vals[20].Table.Limit);
+    printf(" CS = %04x   DS = %04x   ES = %04x   FS = %04x   GS = %04x   SS = %04x   TR = %04x   LDT = %08x:%04x\n", vals[21].Segment.Selector, vals[22].Segment.Selector, vals[23].Segment.Selector, vals[24].Segment.Selector, vals[25].Segment.Selector, vals[26].Segment.Selector, vals[27].Segment.Selector, vals[28].Table.Base, vals[28].Table.Limit);
+    printf("EIP = %08x   EFLAGS = %08x\n", vals[29].Reg32, vals[30].Reg32);
+}
+
 int main() {
     // Initialize ROM and RAM
     const uint32_t romSize = PAGE_SIZE * 16;  // 64 KiB
@@ -195,7 +218,7 @@ int main() {
         emit(rom, "\xf4");                             // [0xffc2] hlt
 
         // Jump to RAM
-        emit(rom, "\xe9\x3c\x00\x00\x10");             // [0xffc3] jmp    0x10000004
+        emit(rom, "\xe9\x3c\x00\xf0\x0f");             // [0xffc3] jmp    0x10000004
                                                        // .. ends at 0xffc7
 
         // --- 16-bit real mode transition to 32-bit protected mode -----------------------------------------------------------
@@ -439,6 +462,10 @@ int main() {
     }
 #endif
 
+    printf("\nInitial CPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
     // ----- Start of emulation -----------------------------------------------------------------------------------------------
 
     // The CPU starts in 16-bit real mode.
@@ -586,6 +613,7 @@ int main() {
     
     printf("Testing data in virtual memory\n\n");
 
+    // Validate first stop output
     auto exitCtx = vcpu->ExitContext();
     {
         // Get CPU registers
@@ -601,7 +629,7 @@ int main() {
             return -1;
         }
 
-        // Validate first stop output
+        // Validate
         if (out[1].Reg32 == 0xfffc3 && out[0].Segment.Selector == 0x0008) {
             printf("Emulation stopped at the right place!\n");
             if (out[2].Reg32 == 0xdeadbeef) {
@@ -609,6 +637,59 @@ int main() {
             }
         }
     }
+    
+    printf("\nFirst stop CPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+    // ----- Second part ------------------------------------------------------------------------------------------------------
+
+    printf("Testing code in virtual memory\n\n");
+
+    // Run CPU once more
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64Halt:
+        printf("Emulation exited due to HLT instruction as expected!\n");
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    // Validate second stop output
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRip,
+            WHvX64RegisterRax,
+            WHvX64RegisterRdx,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+       
+        // Validate
+        if (out[0].Reg32 == 0x10000013) {
+            printf("Emulation stopped at the right place!\n");
+            uint32_t memValue = *(uint32_t *)&ram[0x5000];
+            if (out[1].Reg32 == 0xcc99e897 && out[2].Reg32 == 0x12345678 && memValue == 0xcc99e897) {
+                printf("And we got the right result!\n");
+            }
+        }
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
 
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 
