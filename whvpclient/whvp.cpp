@@ -2,13 +2,10 @@
 
 WinHvPlatform::WinHvPlatform() {
     WHV_CAPABILITY cap;
-    UINT32 size;
-    HRESULT hr;
-    int result = 0;
 
-    // Check for Hyper-V presence
-    hr = WHvGetCapability(WHvCapabilityCodeHypervisorPresent, &cap, sizeof(WHV_CAPABILITY), &size);
-    if (S_OK != hr) {
+    // Check for presence of the hypervisor platform
+    WHvStatus status = GetCapability(WHvCapabilityCodeHypervisorPresent, &cap);
+    if (WHVS_SUCCESS != status) {
         m_present = false;
         return;
     }
@@ -22,6 +19,20 @@ WinHvPlatform::~WinHvPlatform() {
         delete (*it);
     }
     m_partitions.clear();
+}
+
+WHvStatus WinHvPlatform::GetCapability(WHV_CAPABILITY_CODE code, WHV_CAPABILITY *pCap) {
+    UINT32 size;
+    HRESULT hr = WHvGetCapability(WHvCapabilityCodeHypervisorPresent, pCap, sizeof(WHV_CAPABILITY), &size);
+    if (S_OK != hr) {
+        switch (hr) {
+        case WHV_E_UNKNOWN_CAPABILITY:
+            return WHVS_INVALID_CAPABILITY;
+        default:
+            return WHVS_FAILED;
+        }
+    }
+    return WHVS_SUCCESS;
 }
 
 WHvPartitionStatus WinHvPlatform::CreatePartition(WHvPartition **pPartition) {

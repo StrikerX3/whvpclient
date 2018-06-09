@@ -7,6 +7,9 @@
 
 enum WHvStatus {
     WHVS_SUCCESS = 0,                    // The operation completed successfully
+
+    WHVS_FAILED = 0x80000000,            // The operation failed
+    WHVS_INVALID_CAPABILITY,             // An invalid capability code was passed
 };
 
 enum WHvPartitionStatus {
@@ -32,6 +35,8 @@ public:
     ~WinHvPlatform();
 
     const bool IsPresent() const { return m_present; }
+
+    WHvStatus GetCapability(WHV_CAPABILITY_CODE code, WHV_CAPABILITY *pCap);
 
     WHvPartitionStatus CreatePartition(WHvPartition **partition);
     WHvPartitionStatus DeletePartition(WHvPartition **partition);

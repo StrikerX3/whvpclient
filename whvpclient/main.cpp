@@ -38,6 +38,7 @@ int main() {
         return -1;
     }
     printf("RAM allocated: %u bytes\n", ramSize);
+    printf("\n");
 
     // Fill ROM with HLT instructions
     FillMemory(rom, romSize, 0xf4);
@@ -328,6 +329,18 @@ int main() {
         return -1;
     }
 
+    WHV_CAPABILITY cap;
+    WHvStatus status = whvp.GetCapability(WHvCapabilityCodeProcessorVendor, &cap);
+    if (WHVS_SUCCESS == status) {
+        printf("CPU vendor: ");
+        switch (cap.ProcessorVendor) {
+        case WHvProcessorVendorAmd: printf("AMD\n"); break;
+        case WHvProcessorVendorIntel: printf("Intel\n"); break;
+        default: printf("Unknown: 0x%x\n", cap.ProcessorVendor); break;
+        }
+    }
+
+    printf("\n");
 
     WHvPartition *partition;
     WHvPartitionStatus partStatus = whvp.CreatePartition(&partition);
