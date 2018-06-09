@@ -4,6 +4,8 @@
 #include <cstdint>
 #include <cstdio>
 
+#include "whvp.h"
+
 #define PAGE_SIZE 0x1000
 
 //#define DO_MANUAL_INIT
@@ -317,83 +319,52 @@ int main() {
 #undef emit
     }
 
-    // Check for Hyper-V presence
-    WHV_CAPABILITY cap;
-    UINT32 size;
-    HRESULT hr;
-    int result = 0;
-
-    hr = WHvGetCapability(WHvCapabilityCodeHypervisorPresent, &cap, sizeof(WHV_CAPABILITY), &size);
-    if (S_OK != hr) {
-        printf("Failed to get capability: 0x%x\n", hr);
-        result = -1;
-        goto freerom;
-    }
-
-    if (cap.HypervisorPresent) {
+    WinHvPlatform whvp;
+    if (whvp.IsPresent()) {
         printf("Hyper-V platform present\n");
     }
     else {
         printf("Hyper-V platform absent\n");
-        result = -1;
-        goto freerom;
+        return -1;
     }
 
 
-    // Create a partition
-    WHV_PARTITION_HANDLE hPartition;
-    hr = WHvCreatePartition(&hPartition);
-    if (S_OK != hr) {
-        printf("Failed to create partition: 0x%x\n", hr);
-        result = -1;
-        goto freerom;
+    WHvPartition *partition;
+    WHvPartitionStatus partStatus = whvp.CreatePartition(&partition);
+    if (WHVPS_SUCCESS != partStatus) {
+        printf("Failed to create partition\n");
+        return -1;
     }
-
-    printf("Partition created: %p\n", hPartition);
+    printf("Partition created\n");
 
     // Add one processor to the VM
-    WHV_PARTITION_PROPERTY partitionProperty;
+    /*WHV_PARTITION_PROPERTY partitionProperty;
     partitionProperty.ProcessorCount = 1;
     hr = WHvSetPartitionProperty(hPartition, WHvPartitionPropertyCodeProcessorCount, &partitionProperty, sizeof(WHV_PARTITION_PROPERTY));
     if (S_OK != hr) {
         printf("Failed to set processor count to partition: 0x%x\n", hr);
-        result = -1;
-        goto delPartition;
-    }
-
-    printf("  Set processor count to %u\n", partitionProperty.ProcessorCount);
-
-    // Initialize the partition
-    hr = WHvSetupPartition(hPartition);
-    if (S_OK != hr) {
-        printf("Failed to setup partition: 0x%x\n", hr);
-        result = -1;
-        goto delPartition;
-    }
-
-    printf("Partition setup completed\n");
-
-    // Map ROM to the top of the 32-bit address range
-    hr = WHvMapGpaRange(hPartition, rom, 0x100000000L - romSize, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
-    if (S_OK != hr) {
-        printf("Failed to map guest physical address range: 0x%x\n", hr);
-        result = -1;
-        goto delPartition;
-    }
-
-    printf("Mapped ROM to top of 32-bit address range\n");
-
-    // Delete the partition
-delPartition:
-    hr = WHvDeletePartition(hPartition);
-    if (S_OK != hr) {
-        printf("Failed to delete partition: 0x%x\n", hr);
         return -1;
     }
 
-    printf("Partition deleted\n");
+    printf("  Set processor count to %u\n", partitionProperty.ProcessorCount);*/
 
-freerom:
+    // Setup the partition
+    partStatus = partition->Setup();
+    if (WHVPS_SUCCESS != partStatus) {
+        printf("Failed to setup partition\n");
+        return -1;
+    }
+    printf("Partition setup completed\n");
+
+    // Map ROM to the top of the 32-bit address range
+    /*hr = WHvMapGpaRange(hPartition, rom, 0x100000000L - romSize, romSize, WHvMapGpaRangeFlagRead | WHvMapGpaRangeFlagExecute);
+    if (S_OK != hr) {
+        printf("Failed to map guest physical address range: 0x%x\n", hr);
+        return -1;
+    }
+
+    printf("Mapped ROM to top of 32-bit address range\n");*/
+
     if (!VirtualFree(rom, 0, MEM_RELEASE)) {
         printf("Failed to free ROM memory: error code %d\n", GetLastError());
     }
@@ -401,5 +372,5 @@ freerom:
         printf("ROM memory freed\n");
     }
 
-    return result;
+    return 0;
 }
