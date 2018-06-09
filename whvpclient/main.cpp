@@ -740,6 +740,89 @@ int main() {
     printRegs(vcpu);
     printf("\n");
 
+    // ----- Interrupts -------------------------------------------------------------------------------------------------------
+
+    printf("Testing interrupts\n\n");
+
+    // First stop at the HLT inside INT 0x21
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64Halt:
+        printf("Emulation exited due to HLT instruction as expected!\n");
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    // Validate registers
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRip,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Validate
+        if (out[0].Reg32 == 0x10001003) {
+            printf("Emulation stopped at the right place!\n");
+        }
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
+
+    // Now we should hit the HLT after INT 0x21
+    vcpuStatus = vcpu->Run();
+    if (WHVVCPUS_SUCCESS != vcpuStatus) {
+        printf("VCPU failed to run\n");
+        return -1;
+    }
+
+    switch (exitCtx->ExitReason) {
+    case WHvRunVpExitReasonX64Halt:
+        printf("Emulation exited due to HLT instruction as expected!\n");
+        break;
+    default:
+        printf("Emulation exited for another reason: %d\n", exitCtx->ExitReason);
+        break;
+    }
+
+    // Validate registers
+    {
+        // Get CPU registers
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterRip,
+        };
+        WHV_REGISTER_VALUE out[sizeof(regs) / sizeof(regs[0])];
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), out);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Validate
+        if (out[0].Reg32 == 0x10000026) {
+            printf("Emulation stopped at the right place!\n");
+        }
+    }
+
+    printf("\nCPU register state:\n");
+    printRegs(vcpu);
+    printf("\n");
+
     // ----- Cleanup ----------------------------------------------------------------------------------------------------------
 
     printf("\n");
