@@ -8,7 +8,7 @@
 
 #define PAGE_SIZE 0x1000
 
-//#define DO_MANUAL_INIT
+#define DO_MANUAL_INIT
 //#define DO_MANUAL_JMP
 //#define DO_MANUAL_PAGING
 
@@ -210,9 +210,9 @@ int main() {
 #ifdef DO_MANUAL_JMP
         emit(rom, "\xf4")                              // [0xffe6] hlt
         // Fill the rest with HLTs
-        while (addr < 0xfff0) {
-            emit(rom, "\xf4");                         // [0xffe7..0xffef] hlt
-        }
+            while (addr < 0xfff0) {
+                emit(rom, "\xf4");                         // [0xffe7..0xffef] hlt
+            }
 #else
         emit(rom, "\x66\xea\x00\xff\x0f\x00\x08\x00"); // [0xffe6] jmp    dword 0x8:0x000fff00
         emit(rom, "\xf4");                             // [0xffef] hlt
@@ -343,7 +343,7 @@ int main() {
         default: printf("Unknown: 0x%x\n", cap.ProcessorVendor); break;
         }
     }
-    
+
     printf("\n");
 
     // Create a partition
@@ -398,6 +398,44 @@ int main() {
         return -1;
     }
     printf("VCPU created with virtual processor index %u\n", vpIndex);
+
+#ifdef DO_MANUAL_INIT
+    {
+        WHV_REGISTER_NAME regs[] = {
+            WHvX64RegisterGdtr,
+            WHvX64RegisterIdtr,
+            WHvX64RegisterCr0,
+            WHvX64RegisterRip,
+        };
+        WHV_REGISTER_VALUE vals[sizeof(regs) / sizeof(regs[0])];
+
+        vcpuStatus = vcpu->GetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to retrieve VCPU registers\n");
+            return -1;
+        }
+
+        // Load GDT table
+        vals[0].Table.Base = 0xf0000;
+        vals[0].Table.Limit = 0x0018;
+
+        // Load IDT table
+        vals[1].Table.Base = 0xf0018;
+        vals[1].Table.Limit = 0x0110;
+
+        // Enter protected mode
+        vals[2].Reg32 |= 1;
+
+        // Skip initialization code
+        vals[3].Reg32 = 0xffe6;
+
+        vcpuStatus = vcpu->SetRegisters(regs, sizeof(regs) / sizeof(regs[0]), vals);
+        if (WHVVCPUS_SUCCESS != vcpuStatus) {
+            printf("Failed to set VCPU registers\n");
+            return -1;
+        }
+    }
+#endif
 
     // ----- Start of emulation -----------------------------------------------------------------------------------------------
 
