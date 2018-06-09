@@ -23,7 +23,7 @@ WinHvPlatform::~WinHvPlatform() {
 
 WHvStatus WinHvPlatform::GetCapability(WHV_CAPABILITY_CODE code, WHV_CAPABILITY *pCap) {
     UINT32 size;
-    HRESULT hr = WHvGetCapability(WHvCapabilityCodeHypervisorPresent, pCap, sizeof(WHV_CAPABILITY), &size);
+    HRESULT hr = WHvGetCapability(code, pCap, sizeof(WHV_CAPABILITY), &size);
     if (S_OK != hr) {
         switch (hr) {
         case WHV_E_UNKNOWN_CAPABILITY:
@@ -128,6 +128,23 @@ WHvPartitionStatus WHvPartition::Initialize() {
         return WHVPS_CREATE_FAILED;
     }
 
+    return WHVPS_SUCCESS;
+}
+
+WHvPartitionStatus WHvPartition::GetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty) {
+    UINT32 size;
+    HRESULT hr = WHvGetPartitionProperty(m_handle, code, pProperty, sizeof(WHV_PARTITION_PROPERTY), &size);
+    if (S_OK != hr) {
+        return WHVPS_FAILED;
+    }
+    return WHVPS_SUCCESS;
+}
+
+WHvPartitionStatus WHvPartition::SetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty) {
+    HRESULT hr = WHvSetPartitionProperty(m_handle, code, pProperty, sizeof(WHV_PARTITION_PROPERTY));
+    if (S_OK != hr) {
+        return WHVPS_FAILED;
+    }
     return WHVPS_SUCCESS;
 }
 

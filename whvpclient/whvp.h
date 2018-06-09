@@ -15,7 +15,8 @@ enum WHvStatus {
 enum WHvPartitionStatus {
     WHVPS_SUCCESS = 0,                   // Partition created successfully
 
-    WHVPS_CREATE_FAILED = 0x80000000,    // Failed to create partition
+    WHVPS_FAILED = 0x80000000,           // The operation failed
+    WHVPS_CREATE_FAILED,                 // Failed to create partition
     WHVPS_DELETE_FAILED,                 // Failed to delete a partition
     WHVPS_SETUP_FAILED,                  // Failed to setup a partition
     WHVPS_ALREADY_CREATED,               // Attempted to create a partition that was already created
@@ -50,6 +51,8 @@ private:
 
 class WHvPartition {
 public:
+    WHvPartitionStatus GetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty);
+    WHvPartitionStatus SetProperty(WHV_PARTITION_PROPERTY_CODE code, WHV_PARTITION_PROPERTY *pProperty);
     WHvPartitionStatus Setup();
 
     WHvPartitionStatus Close();

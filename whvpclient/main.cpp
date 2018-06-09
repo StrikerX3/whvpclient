@@ -320,6 +320,7 @@ int main() {
 #undef emit
     }
 
+    // Initialize the hypervisor platform
     WinHvPlatform whvp;
     if (whvp.IsPresent()) {
         printf("Hyper-V platform present\n");
@@ -329,6 +330,7 @@ int main() {
         return -1;
     }
 
+    // Check CPU vendor
     WHV_CAPABILITY cap;
     WHvStatus status = whvp.GetCapability(WHvCapabilityCodeProcessorVendor, &cap);
     if (WHVS_SUCCESS == status) {
@@ -339,9 +341,10 @@ int main() {
         default: printf("Unknown: 0x%x\n", cap.ProcessorVendor); break;
         }
     }
-
+    
     printf("\n");
 
+    // Create a partition
     WHvPartition *partition;
     WHvPartitionStatus partStatus = whvp.CreatePartition(&partition);
     if (WHVPS_SUCCESS != partStatus) {
@@ -350,17 +353,16 @@ int main() {
     }
     printf("Partition created\n");
 
-    // Add one processor to the VM
-    /*WHV_PARTITION_PROPERTY partitionProperty;
+    // Give one processor to the partition
+    WHV_PARTITION_PROPERTY partitionProperty;
     partitionProperty.ProcessorCount = 1;
-    hr = WHvSetPartitionProperty(hPartition, WHvPartitionPropertyCodeProcessorCount, &partitionProperty, sizeof(WHV_PARTITION_PROPERTY));
-    if (S_OK != hr) {
-        printf("Failed to set processor count to partition: 0x%x\n", hr);
+    partStatus = partition->SetProperty(WHvPartitionPropertyCodeProcessorCount, &partitionProperty);
+    if (WHVPS_SUCCESS != partStatus) {
+        printf("Failed to set processor count to partition\n");
         return -1;
     }
-
-    printf("  Set processor count to %u\n", partitionProperty.ProcessorCount);*/
-
+    printf("Set processor count to %u\n", partitionProperty.ProcessorCount);
+    
     // Setup the partition
     partStatus = partition->Setup();
     if (WHVPS_SUCCESS != partStatus) {
